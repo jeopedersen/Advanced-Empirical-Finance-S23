@@ -1,0 +1,321 @@
+---
+title: "Introduction to Tidy Finance"
+author: "Jens Pedersen"
+date: '2023-01-30'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## 2 - Introduction to Tidy Finance
+
+In this R Markdown document, you can find my solutions to the exercises for chapter 2 in the course Advanced Empirical Finance.
+
+## 2.1 - Working with stock market data
+
+```{r Question 1}
+library(tidyquant)
+library(tidyverse)
+library(ggplot2)
+AAPL <- tq_get("AAPL",
+  get = "stock.prices",
+  from = "2000-01-01",
+  to = "2021-12-31")
+
+AAPL |>
+  ggplot(aes(x = date, y = adjusted)) +
+  geom_line() +
+  labs(
+    x = NULL,
+    y = NULL,
+    title = "Apple stock prices between beginning of 2000 and end of 2021"
+  )
+```
+
+## 2.2 - Working with stock market data
+
+Now, we would like to analyse the daily net returns, which are defined as r_t = p_t/p\_{t-1}-1.
+
+```{r Question 2}
+returns <- AAPL |>
+  arrange(date) |>
+  mutate(ret = adjusted / lag(adjusted) - 1) |>
+  select(symbol, date, ret)
+returns
+```
+
+The above tibble consists of three columns, where the last contains the daily returns (ret). Naturally, the first row in column (ret) is NA. The arrange() provides a convenient way to order observations in the correct ascending rate. We could write arrange(desc(date)) to order observations by descending dates.
+
+Furthermore, we would like to remove missing values.
+
+```{r Question 2}
+returns <- returns |>
+  drop_na(ret)
+```
+
+Next up, we visualise the distribution of daily returns in a histogram. Just for convenience, we multiply the returns by 100 to get returns in per cent for the visualisation.
+
+```{r Question 2}
+quantile_05 <- quantile(returns |> pull(ret) * 100, probs = 0.05)
+
+returns |>
+  ggplot(aes(x = ret * 100)) +
+  geom_histogram(bins = 100) +
+  geom_vline(aes(xintercept = quantile_05),
+    linetype = "dashed"
+  ) +
+  labs(
+    x = NULL,
+    y = NULL,
+    title = "Distribution of daily Apple stock returns in percent"
+  )
+```
+
+## 2.3 - Compute summary statistics
+
+```{r Question 3}
+
+returns |>
+  mutate(ret = ret * 100) |>
+  summarize(across(
+    ret,
+    list(
+      daily_mean = mean,
+      daily_sd = sd,
+      daily_min = min,
+      daily_max = max
+    )
+  ))
+
+```
+
+Furthermore, we can compute the summary statistics for each individual year with the following chunk.
+
+```{r Question 3}
+returns |>
+  mutate(ret = ret * 100) |>
+  group_by(year = year(date)) |>
+  summarize(across(
+    ret,
+    list(
+      daily_mean = mean,
+      daily_sd = sd,
+      daily_min = min,
+      daily_max = max
+    ),
+    .names = "{.fn}"
+  )) |>
+  print(n = Inf)
+
+```
+
+## 2.2 - Scaling up the analysis
+
+For this part, we would like to scale up our previous analysis to include "MMM" and "BA". This code is homemade, please do ask, if you have any questions.
+
+```{r Question 1}
+
+stock_tickers <- c("AAPL", "MMM", "BA")
+placeholder_tickers <- list()
+
+for (i in stock_tickers) {
+  placeholder_tickers[[i]] <- tq_get(i,
+  get = "stock.prices",
+  from = "2000-01-01",
+  to = "2021-12-31")
+}
+# This library is necessary in order to execute plot_grid(plotlist=plots), which stack plots in order of the above for loop.
+library(cowplot)
+plots <- list()
+
+for (i in stock_tickers) {
+  plots[[i]] <- local({
+    i <- i
+    p <- as.data.frame(placeholder_tickers[[i]]) |>
+      ggplot(aes(x = date, y = adjusted)) +
+      geom_line() +
+      labs(
+      x = NULL,
+      y = NULL,
+    title =  paste0(i," stock prices between beginning of 2000 and end of 2021")
+  )
+  })
+}
+
+plot_grid(plotlist=plots)
+
+```
+
+Now, we would like to compute the returns, but for the vector.
+
+```{r Question 1 cntd.}
+
+returns_vector <- list()
+
+for (i in stock_tickers) {
+returns_vector[[i]] <- placeholder_tickers[[i]] |>
+  arrange(date) |>
+  mutate(ret = adjusted / lag(adjusted) - 1) |>
+  select(symbol, date, ret) |>
+  filter(!is.na(ret)) # this line of code is added to remove NAs
+}
+
+returns
+
+```
+
+Next, we compute the histogram for each stock in the vector.
+
+```{r Question 1 cntd.}
+
+histogram <- list()
+
+for (i in stock_tickers) {
+  histogram[[i]] <- local({
+    i <- i
+    h <- as.data.frame(returns_vector[[i]]) |>
+          ggplot(aes(x = ret * 100)) +
+          geom_histogram(bins = 100) +
+          geom_vline(aes(xintercept = quantile(returns_vector[[i]] |> pull(ret) * 100, probs = 0.05)),
+          linetype = "dashed") +
+          labs(
+                x = NULL,
+                y = NULL,
+                title =  paste0(i, " Distribution of daily Apple stock returns in percent"))
+  })
+}
+
+plot_grid(plotlist=histogram)
+```
+
+Now, we compute the summary statistics for the vector.
+
+```{r Question 1 cntd.}
+
+for (i in stock_tickers) {
+returns_vector[[i]] |>
+  mutate(ret = ret * 100) |>
+  summarize(across(
+    ret,
+    list(
+      daily_mean = mean,
+      daily_sd = sd,
+      daily_min = min,
+      daily_max = max
+    )
+  )) 
+}
+returns_vector
+
+```
+
+```{r Question 1 cntd.}
+for (i in stock_tickers) {
+returns_vector[[i]] |>
+  mutate(ret = ret * 100) |>
+  group_by(year = year(date)) |>
+  summarize(across(
+    ret,
+    list(
+      daily_mean = mean,
+      daily_sd = sd,
+      daily_min = min,
+      daily_max = max
+    ),
+    .names = "{.fn}"
+  )) |>
+  print(n = Inf)
+
+  }
+```
+
+Now, we will call the constituents of the Dow Jones index.
+
+```{r Question 1 cntd.}
+ticker <- tq_index("DOW")
+ticker
+
+index_prices <- tq_get(ticker,
+  get = "stock.prices",
+  from = "2000-01-01",
+  to = "2021-12-31"
+)
+
+```
+
+Plotting
+
+```{r Question 1 cntd.}
+index_prices |>
+  ggplot(aes(
+    x = date,
+    y = adjusted,
+    color = symbol
+  )) +
+  geom_line() +
+  labs(
+    x = NULL,
+    y = NULL,
+    color = NULL,
+    title = "Stock prices of DOW index constituents"
+  ) +
+  theme(legend.position = "none")
+```
+
+Summarizing
+
+```{r Question 1 cntd.}
+all_returns <- index_prices |>
+  group_by(symbol) |>
+  mutate(ret = adjusted / lag(adjusted) - 1) |>
+  select(symbol, date, ret) |>
+  drop_na(ret)
+
+all_returns |>
+  mutate(ret = ret * 100) |>
+  group_by(symbol) |>
+  summarize(across(
+    ret,
+    list(
+      daily_mean = mean,
+      daily_sd = sd,
+      daily_min = min,
+      daily_max = max
+    ),
+    .names = "{.fn}"
+  )) |>
+  print(n = Inf)
+
+```
+Now, we would like to answer the following question: Are days with high aggregate trading volume often followed by high aggregate trading volume days?
+```{r Question 2}
+volume <- index_prices |>
+  group_by(date) |>
+  summarize(volume = sum(volume * close / 1e9))
+
+volume |>
+  ggplot(aes(x = date, y = volume)) +
+  geom_line() +
+  labs(
+    x = NULL, y = NULL,
+    title = "Aggregate daily trading volume of DOW index constitutens"
+  )
+```
+From the above figure, we clearly see that there has been an upward trend in the daily trading volume, which has been particularly high after the COVID-19 outbreak. We can also illustrate the persistence of trading volume by plotting the volume at time t against t-1.
+```{r Question 2 cntd.}
+volume |>
+  ggplot(aes(x = lag(volume), y = volume)) +
+  geom_point() +
+  geom_abline(aes(intercept = 0, slope = 1),
+    linetype = "dashed"
+  ) +
+  labs(
+    x = "Previous day aggregate trading volume",
+    y = "Aggregate trading volume",
+    title = "Persistence in daily trading volume of DOW index constituents"
+  )
+
+```
+From the above, it is clear that days with high trading volume are often followed by similarly high trading volume days.
