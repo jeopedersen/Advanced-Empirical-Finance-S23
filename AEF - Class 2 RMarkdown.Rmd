@@ -1,0 +1,127 @@
+---
+title: "Portfolio choice problems"
+author: "Jens Pedersen"
+date: '2023-02-25'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## 2 - Introduction to Tidy Finance
+
+In this R Markdown document, you can find my solutions to the exercises for chapter 2 in the course Advanced Empirical Finance.
+
+## 2.3 - Portfolio choice problems
+
+First, we will compute the monthly returns from all adjusted daily Dow Jones constituent prices
+
+```{r Question 1}
+library(tidyquant)
+library(tidyverse)
+library(ggplot2)
+
+ticker <- tq_index("DOW")
+
+index_prices <- tq_get(ticker,
+  get = "stock.prices",
+  from = "2000-01-01",
+  to = "2021-12-31"
+)
+
+index_prices <- index_prices |>
+  group_by(symbol) |>
+  mutate(n = n()) |>
+  ungroup() |>
+  filter(n == max(n)) |>
+  select(-n)
+
+
+returns <- index_prices |>
+  mutate(month = floor_date(date, "month")) |>
+  group_by(symbol, month) |>
+  summarize(price = last(adjusted), .groups = "drop_last") |>
+  mutate(ret = price / lag(price) - 1) |>
+  drop_na(ret) |>
+  select(-price)
+
+returns
+```
+
+Next, we compute the vector of historical average returns and sample variance-covariance matrix.
+
+```{r Question 2}
+returns_matrix <- returns |>
+  pivot_wider(
+    names_from = symbol,
+    values_from = ret
+  ) |>
+  select(-month)
+
+Sigma <- cov(returns_matrix)
+mu <- colMeans(returns_matrix)
+```
+
+Now, we compute the minimum variance portfolio weights and the portfolio volatility and average returns.
+
+```{r Question 3}
+N <- ncol(returns_matrix)
+iota <- rep(1, N)
+mvp_weights <- solve(Sigma) %*% iota
+mvp_weights <- mvp_weights / sum(mvp_weights)
+
+tibble(
+  average_ret = as.numeric(t(mvp_weights) %*% mu),
+  volatility = as.numeric(sqrt(t(mvp_weights) %*% Sigma %*% mvp_weights))
+)
+```
+
+Note that the command solve(A,b) solves the equation Ax=b, if b is not provided as in the snippet above defaults to the identity matrix such that solve(Sigma) is delivers Sigma\^-1.
+
+Lastly, we want to visualise the mean-variance efficient frontier.
+
+```{r Question 4}
+mu_bar <- 3 * t(mvp_weights) %*% mu
+
+C <- as.numeric(t(iota) %*% solve(Sigma) %*% iota)
+D <- as.numeric(t(iota) %*% solve(Sigma) %*% mu)
+E <- as.numeric(t(mu) %*% solve(Sigma) %*% mu)
+
+lambda_tilde <- as.numeric(2 * (mu_bar - D / C) / (E - D^2 / C))
+efp_weights <- mvp_weights +
+  lambda_tilde / 2 * (solve(Sigma) %*% mu - D * mvp_weights)
+
+c <- seq(from = -0.4, to = 1.9, by = 0.01)
+res <- tibble(
+  c = c,
+  mu = NA,
+  sd = NA
+)
+
+for (i in seq_along(c)) {
+  w <- (1 - c[i]) * mvp_weights + (c[i]) * efp_weights
+  res$mu[i] <- 12 * 100 * t(w) %*% mu   
+  res$sd[i] <- 100 * sqrt(12) * sqrt(t(w) %*% Sigma %*% w)
+}
+
+res |>
+  ggplot(aes(x = sd, y = mu)) +
+  geom_point() +
+  geom_point(
+    data = res |> filter(c %in% c(0, 1)),
+    size = 4
+  ) +
+  geom_point(
+    data = tibble(
+      mu = 12 * 100 * mu,       
+      sd = 100 * sqrt(12) * sqrt(diag(Sigma))
+    ),
+    aes(y = mu, x = sd), size = 1
+  ) +
+  labs(
+    x = "Annualized standard deviation (in percent)",
+    y = "Annualized expected return (in percent)",
+    title = "Efficient frontier for DOW index constituents"
+  )
+```
